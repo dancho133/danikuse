@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" width="96" alt="Danikuse logo"></p>
+
 # Danikuse
 
 One command that gives an AI agent controlled use of your Brave browser and your Windows desktop.
@@ -12,6 +14,9 @@ Browser agents, desktop agents, scrapers, and test drivers all exist separately.
 - **Dev loop:** the agent opens the site it just built, screenshots it, and looks at its own work.
 - **Web reading:** agent-browser extraction first; keyless Firecrawl (scrape/search/parse) only for public stateless pages.
 - **One JSON contract:** every action returns `{status, browser, action, screenshot, error, next, durationMs, runDir}`. No evidence, no "done".
+- **Your browser, no restart:** the Danikuse Bridge extension drives your live Brave (tabs, clicks, typing, upload) through a local token-authenticated host. Claim a tab, don't spawn one.
+- **Stealth agent browser:** an init-script layer strips automation tells (passes [bot.sannysoft.com](https://bot.sannysoft.com/)) so the agent's own browser looks like a normal Brave.
+- **Captcha adapter:** reCAPTCHA v2 solving via CapSolver (`DANIKUSE_CAPSOLVER_KEY`), token injection by the agent per site.
 
 ## Safety model
 
