@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Danikuse CLI: one entry point over agent-browser (Brave) and agent-desktop.
 // Every command prints one JSON object: {status,browser,action,screenshot,error,next,durationMs,runDir,...}
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -145,8 +145,8 @@ async function browserCmd(args, surface) {
   // Surface comes from the command name (my/agent) when given; the legacy
   // --personal flag only selects a surface for bare verbs, never overrides one.
   const personal = surface ? surface === "personal" : args.includes("--personal");
-  // Explicit flags beat the env default: --show always wins over DANIKUSE_HEADED=0.
-  const hide = args.includes("--hide") ? true : args.includes("--show") ? false : process.env.DANIKUSE_HEADED === "0";
+  // Hidden unless asked: only --show (or DANIKUSE_HEADED=1) opens a visible window.
+  const hide = args.includes("--show") ? false : args.includes("--hide") ? true : process.env.DANIKUSE_HEADED !== "1";
   const rest = args.filter((a) => a !== "--personal" && a !== "--hide" && a !== "--show");
   const action = rest[0] || "snapshot";
   const call = rest.length ? rest : [action];
@@ -293,7 +293,26 @@ async function browserCmd(args, surface) {
     }
   }
   if (action === "open") writeState({ agent: { visible: !hide, session: hide ? "danikuse-auto-bg" : "danikuse-auto" } });
-  if (action === "close") writeState({ agent: { visible: true, session: null } });
+  if (action === "close") {
+    // agent-browser's own `close` is session-unreliable (exit 0, window lives
+    // on): kill the agent Brave processes by profile dir ourselves. The match
+    // string only ever appears in agent sessions; the user's Brave is untouched.
+    // Flags are ignored: close means every agent window goes away.
+    let killed = 0;
+    try {
+      if (process.platform === "win32") {
+        const ps = "Get-CimInstance Win32_Process -Filter \"Name='brave.exe'\" | ForEach-Object { if ($_.CommandLine -match 'automation-profile') { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; 'K' } catch {} } }";
+        const out = execFileSync("powershell.exe", ["-NoProfile", "-Command", ps], { encoding: "utf8", timeout: 30000 });
+        killed = (out.match(/K/g) || []).length;
+      } else {
+        try { execFileSync("pkill", ["-f", "automation-profile"], { timeout: 15000 }); killed = -1; } catch {}
+      }
+    } catch (e) {
+      emit(action, "automation", started, runDir, { ok: false, error: String(e.message || e) });
+    }
+    writeState({ agent: { visible: false, session: null } });
+    emit(action, "automation", started, runDir, { ok: true, data: { killed } });
+  }
 
   const env = { AGENT_BROWSER_EXECUTABLE_PATH: brave };
   // Visible and background runs are separate sessions AND separate profiles:
