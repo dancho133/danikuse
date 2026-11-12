@@ -144,10 +144,12 @@ async function browserCmd(args, surface) {
   if (personal && args.includes("--hide")) {
     emit(action, "personal-brave", started, runDir, { ok: false, error: "personal-brave-always-visible", next: "Personal Brave is the user's real browser and is always visible; drop --hide." });
   }
-  if (personal && process.env.DANIKUSE_NO_BRIDGE !== "1" && (action === "tabs" || action === "open" || action === "eval")) {
+  if (personal && process.env.DANIKUSE_NO_BRIDGE !== "1" && (action === "tabs" || action === "open" || action === "eval" || action === "goto" || action === "close-tab")) {
     // Bridge first: extension in the user's Brave, no CDP, no restart, no focus steal.
-    const bridgeAction = action === "tabs" ? "listTabs" : action === "open" ? "openTab" : "pageInfo";
-    const fields = action === "open" ? { url: rest[1], active: false } : {};
+    const bridgeAction = action === "tabs" ? "listTabs" : action === "open" ? "openTab" : action === "goto" ? "navigateTab" : action === "close-tab" ? "closeTab" : "pageInfo";
+    const fields = action === "open" ? { url: rest[1], active: false }
+      : action === "goto" ? { url: rest[1], match: rest[2] || "github.com" }
+      : action === "close-tab" ? (rest[1] === "--id" ? { tabId: Number(rest[2]) } : { match: rest[1] || "" }) : {};
     const result = await bridgeCall(bridgeAction, fields);
     if (result !== null) {
       emit(action, "personal-brave-bridge", started, runDir, { ok: true, data: result });

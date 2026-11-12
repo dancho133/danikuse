@@ -22,6 +22,20 @@ async function onCommand(msg) {
     } else if (msg.action === "openTab") {
       const tab = await chrome.tabs.create({ url: msg.url, active: Boolean(msg.active) });
       reply(true, { id: tab.id, title: tab.title, url: tab.url });
+    } else if (msg.action === "navigateTab") {
+      const tabs = await chrome.tabs.query({});
+      const tab = (msg.tabId && tabs.find((t) => t.id === msg.tabId))
+        || tabs.find((t) => (t.url || "").includes(msg.match || "github.com"));
+      if (!tab) throw new Error("no matching open tab to navigate");
+      const updated = await chrome.tabs.update(tab.id, { url: msg.url, active: true });
+      reply(true, { id: updated.id, title: updated.title, url: updated.url });
+    } else if (msg.action === "closeTab") {
+      const tabs = await chrome.tabs.query({});
+      const tab = (msg.tabId && tabs.find((t) => t.id === msg.tabId))
+        || tabs.find((t) => (t.url || "").includes(msg.match || ""));
+      if (!tab) throw new Error("no matching tab to close");
+      await chrome.tabs.remove(tab.id);
+      reply(true, { closed: tab.id, url: tab.url });
     } else if (msg.action === "pageInfo") {
       let tabId = msg.tabId;
       if (!tabId) {
