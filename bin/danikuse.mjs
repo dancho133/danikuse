@@ -113,7 +113,7 @@ async function bridgeCall(action, fields = {}, timeoutMs = 8000) {
       signal: AbortSignal.timeout(timeoutMs),
     });
     const data = await r.json();
-    return data.ok ? data.result : null;
+    return data.ok ? data.result : { __bridgeError: data.error || "bridge-error" };
   } catch { return null; }
 }
 
@@ -150,7 +150,7 @@ async function browserCmd(args, surface) {
     if (statSync(file).size > 15 * 1024 * 1024) emit(action, "personal-brave", started, runDir, { ok: false, error: "file over 15 MB" });
     const flagVal = (f) => (rest.includes(f) ? rest[rest.indexOf(f) + 1] : undefined);
     const result = await bridgeCall("uploadFile", { filename: file.split(/[\\/]/).pop(), mime: "application/octet-stream", dataBase64: readFileSync(file).toString("base64"), selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined }, 30000);
-    emit(action, "personal-brave-bridge", started, runDir, result !== null ? { ok: true, data: result } : { ok: false, error: "bridge-unavailable" });
+    emit(action, "personal-brave-bridge", started, runDir, result === null ? { ok: false, error: "bridge-unavailable" } : result.__bridgeError ? { ok: false, error: result.__bridgeError } : { ok: true, data: result });
   }
   if (personal && process.env.DANIKUSE_NO_BRIDGE !== "1" && (action === "tabs" || action === "open" || action === "eval" || action === "goto" || action === "close-tab" || action === "type" || action === "click" || action === "submit" || action === "scan")) {
     // Bridge first: extension in the user's Brave, no CDP, no restart, no focus steal.
@@ -166,7 +166,7 @@ async function browserCmd(args, surface) {
       : action === "submit" ? { selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined } : {};
     const result = await bridgeCall(bridgeAction, fields);
     if (result !== null) {
-      emit(action, "personal-brave-bridge", started, runDir, { ok: true, data: result });
+      emit(action, "personal-brave-bridge", started, runDir, result.__bridgeError ? { ok: false, error: result.__bridgeError } : { ok: true, data: result });
     }
     if (action === "tabs") {
       emit(action, "personal-brave", started, runDir, { ok: false, error: "bridge-unavailable", next: "Install the Danikuse Bridge once: run host/install-bridge.ps1, then brave://extensions -> Developer mode -> Load unpacked -> danikuse/extension. Fallback: danikuse my windows lists titles only." });
