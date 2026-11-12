@@ -188,7 +188,7 @@ async function browserCmd(args, surface) {
       : action === "eval" ? { tabId }
       : action === "wait" ? { selector: rest[1] || flagVal("--at"), timeoutMs: waitMs, tabId }
       : action === "screenshot" ? { tabId }
-      : action === "submit" ? { selector: flagVal("--at"), allowAuth: flagVal("--at") ? true : undefined, tabId } : {};
+      : action === "submit" ? { selector: flagVal("--at"), allowAuth: flagVal("--at") ? true : undefined, tabId } : { tabId };
     const result = await bridgeCall(bridgeAction, fields, action === "wait" ? waitMs + 15000 : 20000);
     if (result === null) {
       // Bridge down is a bridge error for EVERY action: never silently fall

@@ -2,7 +2,11 @@
 
 # Danikuse
 
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Windows](https://img.shields.io/badge/Windows-certified-0078D4) ![Benchmark](https://img.shields.io/badge/benchmark-5%2F5-brightgreen) ![Node](https://img.shields.io/badge/node-%3E%3D18-339933)
+
 Одна команда, которая даёт AI-агенту контролируемый доступ к вашему браузеру Brave и рабочему столу Windows.
+
+> 🎬 Демо-видео в работе — тред запуска: [x.com/danik13dev/status/2120983521552707945](https://x.com/danik13dev/status/2120983521552707945)
 
 **Скажите своему AI-агенту:** «Поставь Danikuse из этого репозитория: запусти `install.ps1`, прочитай `SKILL.md` и используй `/danikuse` как единственную точку входа для браузера и десктопа».
 

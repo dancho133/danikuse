@@ -9,3 +9,5 @@
 4/ Proof, not promises: a five-task benchmark (form fill, extraction, dev-loop screenshot, desktop app, personal-browser draft) passes 5/5. Install is ~156 MB, zero paid keys. Limits, stated plainly: live captchas and long logged-in flows aren't battle-tested yet.
 
 5/ It's Apache-2.0, built on agent-browser + agent-desktop with Playwright in the loop. Public pages go through keyless Firecrawl. If you build browser agents, I'd like your review more than your star: github.com/dancho133/danikuse
+
+Posted: https://x.com/danik13dev/status/2120983521552707945 (posts 2-3 reworded live, 1/4/5 verbatim)
