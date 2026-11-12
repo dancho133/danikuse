@@ -210,6 +210,21 @@ async function browserCmd(args, surface) {
     }
     emit(action, "automation", started, runDir, { ok: false, status: "captcha-blocked", error: `bot-detection: ${reason}`, data: { reason }, next: "Tell the user the site blocked this browser; switch surface or source, do not retry in a loop." });
   }
+  if (action === "captcha-balance" || action === "captcha") {
+    const key = process.env.DANIKUSE_CAPSOLVER_KEY;
+    if (!key) emit(action, "automation", started, runDir, { ok: false, error: "no-key", next: "Register at capsolver.com, top up, then set DANIKUSE_CAPSOLVER_KEY." });
+    const { balance, solveRecaptchaV2 } = await import("../captcha/capsolver.mjs");
+    try {
+      if (action === "captcha-balance") {
+        emit(action, "automation", started, runDir, { ok: true, data: { balance: await balance(key) } });
+      } else {
+        const token = await solveRecaptchaV2(key, rest[2], rest[1], { invisible: rest.includes("--invisible") });
+        emit(action, "automation", started, runDir, { ok: true, data: { token: token.slice(0, 24) + "…", full: token }, next: "Inject via eval: set #g-recaptcha-response value, call ___grecaptcha_cfg callback, then submit." });
+      }
+    } catch (e) {
+      emit(action, "automation", started, runDir, { ok: false, error: String(e.message || e) });
+    }
+  }
   if (action === "open") writeState({ agent: { visible: !hide, session: hide ? "danikuse-auto-bg" : "danikuse-auto" } });
   if (action === "close") writeState({ agent: { visible: true, session: null } });
 
