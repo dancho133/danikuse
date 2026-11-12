@@ -1,0 +1,15 @@
+{
+  "title": "Danikuse",
+  "theme": "studio",
+  "size": "16:9",
+  "voice": "af_heart",
+  "music": true,
+  "captions": "auto",
+  "pace": 1.3,
+  "targetSeconds": 24.2,
+  "watermark": false,
+  "heard": {
+    "Danikuse": ["Danakius", "Danakus", "danny coos", "danny coose", "danikuse"]
+  },
+  "defaults": "0.6"
+}
