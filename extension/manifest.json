@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Danikuse Bridge",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Lets the Danikuse CLI work with tabs in your own Brave: list, open, claim. No restart, no debug port.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA523gEOYXBk2vfcJHu5bcLwtDTPHpjHgRngB3d5M8i1iIy7R2pG4G8xsVOaEpEuYGeZmjtLeMXLkcyjV46pRRdwaFoqlBMWBQ+6eb5XdEI/YaIbtGRQuluJpzdDsTznHZiKu2+waRLnM77oaDVh6ckiOfPWp+pEo2oMBQYqwRYUqAtniq2s8ndll7KsheirrgQV3fOYq15vBLleq5V540i4xTQNxIw0HklgMACiGGbo24lOFKwZ68EjZTxH0dxQOyUHG/HcPXpsGx1xjSXe4Hs+wj6dXPTAlga2U5o+u8q703tx1gP6u8SPvE3vVVckZZ2HdiTK7BhPliavqxgeeITQIDAQAB",
   "permissions": ["tabs", "scripting", "nativeMessaging"],
