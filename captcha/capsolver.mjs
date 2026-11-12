@@ -25,15 +25,21 @@ export async function solveRecaptchaV2(apiKey, websiteURL, websiteKey, { invisib
   const { taskId } = await post("/createTask", {
     clientKey: apiKey,
     task: {
-      type: invisible ? "ReCaptchaV2Task" : "ReCaptchaV2TaskProxyLess",
+      type: "ReCaptchaV2TaskProxyLess",
       websiteURL,
       websiteKey,
+      ...(invisible ? { isInvisible: true } : {}),
     },
   });
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     await new Promise((r) => setTimeout(r, 5000));
-    const data = await post("/getTaskResult", { clientKey: apiKey, taskId });
+    let data;
+    try {
+      data = await post("/getTaskResult", { clientKey: apiKey, taskId });
+    } catch {
+      continue; // transient network blip: keep polling until the overall timeout
+    }
     if (data.status === "ready") return data.solution.gRecaptchaResponse;
     if (data.status === "failed") throw new Error("capsolver: task failed");
   }

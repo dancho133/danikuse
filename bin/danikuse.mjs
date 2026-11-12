@@ -31,11 +31,22 @@ function resolveCmd(cmd) {
     "agent-desktop": join(npmRoot, "agent-desktop.exe"),
     agy: join(homedir(), "AppData", "Local", "agy", "bin", "agy.exe"),
   };
-  return candidates[cmd] && existsSync(candidates[cmd]) ? candidates[cmd] : cmd;
+  if (candidates[cmd] && existsSync(candidates[cmd])) return candidates[cmd];
+  // pnpm/yarn/nvm/fnm/scoop users: fall back to whatever is on PATH.
+  if (process.platform === "win32") {
+    try {
+      const w = spawnSync("where", [cmd], { encoding: "utf8" });
+      const first = (w.stdout || "").split(/\r?\n/).map((s) => s.trim()).find((s) => s && existsSync(s));
+      if (first) return first;
+    } catch {}
+  }
+  return cmd;
 }
 
 function run(cmd, args, env = {}) {
-  const r = spawnSync(resolveCmd(cmd), args, { encoding: "utf8", env: { ...process.env, ...env } });
+  const bin = resolveCmd(cmd);
+  // spawnSync cannot run .cmd shims without a shell (ENOENT on Windows).
+  const r = spawnSync(bin, args, { encoding: "utf8", env: { ...process.env, ...env }, shell: /\.cmd$/i.test(bin) });
   const out = (r.stdout || "").trim();
   const err = ((r.stderr || "") + (r.error ? ` ${r.error.message}` : "")).trim();
   return { code: r.status ?? 1, out, err, text: r.status === 0 ? out : err || out };
@@ -104,7 +115,7 @@ function doctor() {
   });
 }
 
-async function bridgeCall(action, fields = {}, timeoutMs = 8000) {
+async function bridgeCall(action, fields = {}, timeoutMs = 20000) {
   try {
     const token = readFileSync(join(HOME, "bridge-token.txt"), "utf8").trim();
     const r = await fetch("http://127.0.0.1:17331/", {
@@ -113,7 +124,11 @@ async function bridgeCall(action, fields = {}, timeoutMs = 8000) {
       body: JSON.stringify({ action, ...fields }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    const data = await r.json();
+    // 20s default covers the host's 15s extension timeout: an extension-side
+    // timeout must surface as the action's error, not as bridge-unavailable.
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); } catch { return { __bridgeError: `http-${r.status}: ${text.slice(0, 120)}` }; }
     return data.ok ? data.result : { __bridgeError: data.error || "bridge-error" };
   } catch { return null; }
 }
@@ -148,30 +163,44 @@ async function browserCmd(args, surface) {
   if (personal && action === "upload") {
     const file = rest[1];
     if (!file || !existsSync(file)) emit(action, "personal-brave", started, runDir, { ok: false, error: "file not found", next: "danikuse my upload <path> [--at SELECTOR] [--tab ID]" });
-    if (statSync(file).size > 15 * 1024 * 1024) emit(action, "personal-brave", started, runDir, { ok: false, error: "file over 15 MB" });
+    // Chrome Native Messaging caps one host->extension message at 1 MB; with
+    // base64 + JSON overhead ~700 KB of file is the safe ceiling. Chunked
+    // upload for bigger files is future work, not silent host death.
+    if (statSync(file).size > 700 * 1024) emit(action, "personal-brave", started, runDir, { ok: false, error: "file over 700 KB: chunked upload not implemented yet" });
     const flagVal = (f) => (rest.includes(f) ? rest[rest.indexOf(f) + 1] : undefined);
     const result = await bridgeCall("uploadFile", { filename: file.split(/[\\/]/).pop(), mime: "application/octet-stream", dataBase64: readFileSync(file).toString("base64"), selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined }, 30000);
     emit(action, "personal-brave-bridge", started, runDir, result === null ? { ok: false, error: "bridge-unavailable" } : result.__bridgeError ? { ok: false, error: result.__bridgeError } : { ok: true, data: result });
   }
-  if (personal && process.env.DANIKUSE_NO_BRIDGE !== "1" && (action === "tabs" || action === "open" || action === "eval" || action === "goto" || action === "close-tab" || action === "type" || action === "click" || action === "submit" || action === "scan")) {
+  if (personal && process.env.DANIKUSE_NO_BRIDGE !== "1" && (action === "tabs" || action === "open" || action === "eval" || action === "goto" || action === "close-tab" || action === "type" || action === "click" || action === "submit" || action === "scan" || action === "screenshot" || action === "wait")) {
     // Bridge first: extension in the user's Brave, no CDP, no restart, no focus steal.
     const flagVal = (f) => (rest.includes(f) ? rest[rest.indexOf(f) + 1] : undefined);
-    const stripFlags = (extra) => rest.slice(1).filter((a, i, arr) => ![...extra, "--tab", "--at"].includes(a) && arr[i - 1] !== "--tab" && arr[i - 1] !== "--at").join(" ");
-    const bridgeAction = action === "tabs" ? "listTabs" : action === "open" ? "openTab" : action === "goto" ? "navigateTab" : action === "close-tab" ? "closeTab" : action === "type" ? "typeOnTab" : action === "click" ? "clickOnTab" : action === "submit" ? "submitForm" : action === "scan" ? "scanPage" : "pageInfo";
+    const tabId = flagVal("--tab") ? Number(flagVal("--tab")) : undefined;
+    const stripFlags = (extra) => rest.slice(1).filter((a, i, arr) => ![...extra, "--tab", "--at", "--timeout"].includes(a) && !["--tab", "--at", "--timeout"].includes(arr[i - 1])).join(" ");
+    if (action === "goto" && !rest[1]) emit(action, "personal-brave", started, runDir, { ok: false, error: "usage: danikuse my goto <url> [match] [--tab ID]", next: "Claim a tab explicitly: pass a URL-match string or --tab ID. No default tab is ever hijacked." });
+    if (action === "wait" && !rest[1] && !flagVal("--at")) emit(action, "personal-brave", started, runDir, { ok: false, error: "usage: danikuse my wait <selector> [--timeout SEC] [--tab ID]" });
+    const bridgeAction = action === "tabs" ? "listTabs" : action === "open" ? "openTab" : action === "goto" ? "navigateTab" : action === "close-tab" ? "closeTab" : action === "type" ? "typeOnTab" : action === "click" ? "clickOnTab" : action === "submit" ? "submitForm" : action === "scan" ? "scanPage" : action === "screenshot" ? "captureScreenshot" : action === "wait" ? "waitForSelector" : "pageInfo";
+    const waitMs = action === "wait" ? Math.min(Number(flagVal("--timeout") || 15) * 1000, 55000) : 20000;
     const fields = action === "open" ? { url: rest[1], active: rest.includes("--active") }
-      : action === "goto" ? { url: rest[1], match: rest[2] || "github.com" }
-      : action === "type" ? { text: stripFlags(["--send"]), submit: rest.includes("--send"), selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined }
-      : action === "click" ? { text: stripFlags([]), selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined }
+      : action === "goto" ? { url: rest[1], match: rest[2], tabId }
+      : action === "type" ? { text: stripFlags(["--send"]), submit: rest.includes("--send"), selector: flagVal("--at"), tabId }
+      : action === "click" ? { text: stripFlags([]), selector: flagVal("--at"), tabId }
       : action === "close-tab" ? (rest[1] === "--id" ? { tabId: Number(rest[2]) } : { match: rest[1] || "" })
-      : action === "eval" ? { tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined }
-      : action === "submit" ? { selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined } : {};
-    const result = await bridgeCall(bridgeAction, fields);
-    if (result !== null) {
-      emit(action, "personal-brave-bridge", started, runDir, result.__bridgeError ? { ok: false, error: result.__bridgeError } : { ok: true, data: result });
+      : action === "eval" ? { tabId }
+      : action === "wait" ? { selector: rest[1] || flagVal("--at"), timeoutMs: waitMs, tabId }
+      : action === "screenshot" ? { tabId }
+      : action === "submit" ? { selector: flagVal("--at"), allowAuth: flagVal("--at") ? true : undefined, tabId } : {};
+    const result = await bridgeCall(bridgeAction, fields, action === "wait" ? waitMs + 15000 : 20000);
+    if (result === null) {
+      // Bridge down is a bridge error for EVERY action: never silently fall
+      // through to the CDP-restart demand below.
+      emit(action, "personal-brave", started, runDir, { ok: false, error: "bridge-unavailable", next: "Install the Danikuse Bridge once: run host/install-bridge.ps1, then brave://extensions -> Developer mode -> Load unpacked -> danikuse/extension. If installed, reload the extension (service worker may have slept). Fallback: danikuse my windows lists titles only." });
     }
-    if (action === "tabs") {
-      emit(action, "personal-brave", started, runDir, { ok: false, error: "bridge-unavailable", next: "Install the Danikuse Bridge once: run host/install-bridge.ps1, then brave://extensions -> Developer mode -> Load unpacked -> danikuse/extension. Fallback: danikuse my windows lists titles only." });
+    if (action === "screenshot" && !result.__bridgeError && result.jpgBase64) {
+      const shot = join(runDir, "screenshot.jpg");
+      writeFileSync(shot, Buffer.from(result.jpgBase64, "base64"));
+      emit(action, "personal-brave-bridge", started, runDir, { ok: true, screenshot: shot, data: { windowId: result.windowId, tabActive: result.tabActive, note: result.tabActive ? undefined : "captured the window's visible tab, not the target tab" } });
     }
+    emit(action, "personal-brave-bridge", started, runDir, result.__bridgeError ? { ok: false, error: result.__bridgeError } : { ok: true, data: result });
   }
   if (personal && action === "windows") {
     // Claim-tab view of the live Brave: window titles only, no CDP, no restart.
@@ -210,6 +239,40 @@ async function browserCmd(args, surface) {
     }
     emit(action, "automation", started, runDir, { ok: false, status: "captcha-blocked", error: `bot-detection: ${reason}`, data: { reason }, next: "Tell the user the site blocked this browser; switch surface or source, do not retry in a loop." });
   }
+  const CHALLENGE_PROBE = `[...document.querySelectorAll('iframe')].some(f=>/recaptcha|hcaptcha|turnstile|challenge|arkose|datadome/i.test(f.src||''))`;
+  if (action === "captcha-check" || action === "captcha-wait") {
+    const flagVal = (f) => (rest.includes(f) ? rest[rest.indexOf(f) + 1] : undefined);
+    const probeJs = `JSON.stringify({url: location.href, cleared: ${flagVal("--absent") ? `!document.querySelector(${JSON.stringify(flagVal("--absent"))})` : flagVal("--present") ? `!!document.querySelector(${JSON.stringify(flagVal("--present"))})` : `!(${CHALLENGE_PROBE})`}})`;
+    const probe = async () => {
+      const r = run("agent-browser", ["--session", hide ? "danikuse-auto-bg" : "danikuse-auto", "eval", probeJs], { AGENT_BROWSER_EXECUTABLE_PATH: brave });
+      try {
+        let v = JSON.parse(r.out);
+        if (typeof v === "string") v = JSON.parse(v);
+        // A blank page is never "cleared": the session lost its tab (restart/crash).
+        if (!v.url || v.url === "about:blank") return { cleared: false, url: v.url || "about:blank", blank: true };
+        return { cleared: Boolean(v.cleared), url: v.url };
+      } catch { return { cleared: false, url: null, parseError: true }; }
+    };
+    if (action === "captcha-check") {
+      emit(action, "automation", started, runDir, { ok: true, data: await probe() });
+    }
+    const timeoutMs = Number(flagVal("--timeout") || 300) * 1000;
+    const t0 = Date.now();
+    if (hide) console.error(JSON.stringify({ status: "needs-human", note: "session is hidden: re-run this flow with --show so the checkbox is visible, or switch surface to personal Brave" }));
+    else console.error(JSON.stringify({ status: "needs-human", note: "human check: click the checkbox in the agent browser window; resuming automatically" }));
+    const wantUrl = flagVal("--url");
+    let st = await probe();
+    if (wantUrl && st.url && !st.url.includes(wantUrl)) {
+      emit(action, "automation", started, runDir, { ok: false, error: "wrong-page", data: st, next: `Navigate to the challenge page first (expected URL containing: ${wantUrl}).` });
+    }
+    while (!st.cleared && Date.now() - t0 < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 3000));
+      st = await probe();
+    }
+    emit(action, "automation", started, runDir, st.cleared
+      ? { ok: true, data: { cleared: true, url: st.url, waitedSec: Math.round((Date.now() - t0) / 1000) } }
+      : { ok: false, status: st.blank ? "session-lost" : "captcha-blocked", error: st.blank ? "browser tab is blank: session lost the page" : "human did not clear the challenge in time", data: st, next: st.blank ? "Re-open the page and retry; do not trust a clear on about:blank." : "Report the block; do not retry in a loop." });
+  }
   if (action === "captcha-balance" || action === "captcha") {
     const key = process.env.DANIKUSE_CAPSOLVER_KEY;
     if (!key) emit(action, "automation", started, runDir, { ok: false, error: "no-key", next: "Register at capsolver.com, top up, then set DANIKUSE_CAPSOLVER_KEY." });
@@ -218,7 +281,11 @@ async function browserCmd(args, surface) {
       if (action === "captcha-balance") {
         emit(action, "automation", started, runDir, { ok: true, data: { balance: await balance(key) } });
       } else {
-        const token = await solveRecaptchaV2(key, rest[2], rest[1], { invisible: rest.includes("--invisible") });
+        const positional = rest.filter((a) => a !== "captcha" && !a.startsWith("--"));
+        if (positional.length < 2) emit(action, "automation", started, runDir, { ok: false, error: "usage: danikuse agent captcha <sitekey> <pageurl> [--invisible]" });
+        // Token lives ~2 min and stays in the local run dir (same sensitivity as
+        // screenshots); accepted risk, documented here instead of silent.
+        const token = await solveRecaptchaV2(key, positional[1], positional[0], { invisible: rest.includes("--invisible") });
         emit(action, "automation", started, runDir, { ok: true, data: { token: token.slice(0, 24) + "…", full: token }, next: "Inject via eval: set #g-recaptcha-response value, call ___grecaptcha_cfg callback, then submit." });
       }
     } catch (e) {
@@ -234,7 +301,7 @@ async function browserCmd(args, surface) {
   const base = ["--session", hide ? "danikuse-auto-bg" : "danikuse-auto",
     "--profile", hide ? AUTO_PROFILE_BG : AUTO_PROFILE];
   if (!hide) base.push("--headed");
-  if (action === "open") {
+  if (action === "open" || action === "goto" || action === "navigate") {
     const stealthJs = join(dirname(fileURLToPath(import.meta.url)), "..", "stealth", "stealth.js");
     if (existsSync(stealthJs)) base.push("--init-script", stealthJs);
     // HTTP-level UA: headless Chromium sends HeadlessChrome/<v>; servers see it.

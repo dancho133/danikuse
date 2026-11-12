@@ -3,6 +3,10 @@
 # Developer mode -> Load unpacked -> select this repo's extension folder.
 $ErrorActionPreference = "Stop"
 $hostDir = $PSScriptRoot
+# nvm/fnm/volta/scoop users have no C:\Program Files\nodejs: pin the .cmd to
+# the node that is actually on PATH, so the host always starts.
+$node = (Get-Command node -ErrorAction Stop).Source
+Set-Content (Join-Path $hostDir "danikuse-host.cmd") "@echo off`r`n`"$node`" `"%~dp0danikuse-host.mjs`"" -Encoding ascii
 $manifestPath = Join-Path $hostDir "com.danikuse.bridge.json"
 $manifest = @{
   name = "com.danikuse.bridge"
