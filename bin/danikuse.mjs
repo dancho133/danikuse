@@ -2,7 +2,7 @@
 // Danikuse CLI: one entry point over agent-browser (Brave) and agent-desktop.
 // Every command prints one JSON object: {status,browser,action,screenshot,error,next,durationMs,runDir,...}
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -103,14 +103,14 @@ function doctor() {
   });
 }
 
-async function bridgeCall(action, fields = {}) {
+async function bridgeCall(action, fields = {}, timeoutMs = 8000) {
   try {
     const token = readFileSync(join(HOME, "bridge-token.txt"), "utf8").trim();
     const r = await fetch("http://127.0.0.1:17331/", {
       method: "POST",
       headers: { "content-type": "application/json", "x-danikuse-token": token },
       body: JSON.stringify({ action, ...fields }),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const data = await r.json();
     return data.ok ? data.result : null;
@@ -144,17 +144,26 @@ async function browserCmd(args, surface) {
   if (personal && args.includes("--hide")) {
     emit(action, "personal-brave", started, runDir, { ok: false, error: "personal-brave-always-visible", next: "Personal Brave is the user's real browser and is always visible; drop --hide." });
   }
-  if (personal && process.env.DANIKUSE_NO_BRIDGE !== "1" && (action === "tabs" || action === "open" || action === "eval" || action === "goto" || action === "close-tab" || action === "type" || action === "click" || action === "submit")) {
+  if (personal && action === "upload") {
+    const file = rest[1];
+    if (!file || !existsSync(file)) emit(action, "personal-brave", started, runDir, { ok: false, error: "file not found", next: "danikuse my upload <path> [--at SELECTOR] [--tab ID]" });
+    if (statSync(file).size > 15 * 1024 * 1024) emit(action, "personal-brave", started, runDir, { ok: false, error: "file over 15 MB" });
+    const flagVal = (f) => (rest.includes(f) ? rest[rest.indexOf(f) + 1] : undefined);
+    const result = await bridgeCall("uploadFile", { filename: file.split(/[\\/]/).pop(), mime: "application/octet-stream", dataBase64: readFileSync(file).toString("base64"), selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined }, 30000);
+    emit(action, "personal-brave-bridge", started, runDir, result !== null ? { ok: true, data: result } : { ok: false, error: "bridge-unavailable" });
+  }
+  if (personal && process.env.DANIKUSE_NO_BRIDGE !== "1" && (action === "tabs" || action === "open" || action === "eval" || action === "goto" || action === "close-tab" || action === "type" || action === "click" || action === "submit" || action === "scan")) {
     // Bridge first: extension in the user's Brave, no CDP, no restart, no focus steal.
     const flagVal = (f) => (rest.includes(f) ? rest[rest.indexOf(f) + 1] : undefined);
     const stripFlags = (extra) => rest.slice(1).filter((a, i, arr) => ![...extra, "--tab", "--at"].includes(a) && arr[i - 1] !== "--tab" && arr[i - 1] !== "--at").join(" ");
-    const bridgeAction = action === "tabs" ? "listTabs" : action === "open" ? "openTab" : action === "goto" ? "navigateTab" : action === "close-tab" ? "closeTab" : action === "type" ? "typeOnTab" : action === "click" ? "clickOnTab" : action === "submit" ? "submitForm" : "pageInfo";
+    const bridgeAction = action === "tabs" ? "listTabs" : action === "open" ? "openTab" : action === "goto" ? "navigateTab" : action === "close-tab" ? "closeTab" : action === "type" ? "typeOnTab" : action === "click" ? "clickOnTab" : action === "submit" ? "submitForm" : action === "scan" ? "scanPage" : "pageInfo";
     const fields = action === "open" ? { url: rest[1], active: rest.includes("--active") }
       : action === "goto" ? { url: rest[1], match: rest[2] || "github.com" }
       : action === "type" ? { text: stripFlags(["--send"]), submit: rest.includes("--send"), selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined }
       : action === "click" ? { text: stripFlags([]), selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined }
       : action === "close-tab" ? (rest[1] === "--id" ? { tabId: Number(rest[2]) } : { match: rest[1] || "" })
-      : action === "eval" ? { tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined } : {};
+      : action === "eval" ? { tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined }
+      : action === "submit" ? { selector: flagVal("--at"), tabId: flagVal("--tab") ? Number(flagVal("--tab")) : undefined } : {};
     const result = await bridgeCall(bridgeAction, fields);
     if (result !== null) {
       emit(action, "personal-brave-bridge", started, runDir, { ok: true, data: result });

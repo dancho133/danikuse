@@ -79,7 +79,7 @@ async function onCommand(msg) {
       const [res] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (text, submit, selector) => {
-          const pick = (s) => [...document.querySelectorAll(s)].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+          const pick = (s) => [...document.querySelectorAll(s)].find((e) => { const r = e.getBoundingClientRect(); if (r.width === 0 || r.height === 0) return false; const st = getComputedStyle(e); return st.visibility !== "hidden" && st.display !== "none" && st.opacity !== "0"; });
           const el = selector ? pick(selector) : (pick('div[contenteditable="true"]') || pick("textarea") || pick('input[type="text"]'));
           if (!el) return { error: "no text field found" };
           el.focus();
@@ -104,7 +104,7 @@ async function onCommand(msg) {
       const [res] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (text, selector) => {
-          const visible = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const visible = (e) => { const r = e.getBoundingClientRect(); if (r.width === 0 || r.height === 0) return false; const s = getComputedStyle(e); return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0"; };
           const els = (selector
             ? [...document.querySelectorAll(selector)]
             : [...document.querySelectorAll("button, a, input[type=submit]")]).filter(visible);
@@ -127,22 +127,70 @@ async function onCommand(msg) {
       const [res] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (selector) => {
-          const banned = /logout|login|signout|signin|search/i;
+          const banned = /logout|login|signout|signin|search|auth|session/i;
+          // getAttribute, never .action/.id: inputs named "action" clobber the property.
+          const sig = (f) => ((f.getAttribute("action") || "") + "/" + (f.getAttribute("id") || "") + "/" + (f.getAttribute("name") || ""));
+          const shown = (f) => { const r = f.getBoundingClientRect(); const s = getComputedStyle(f); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0"; };
+          const safe = (f) => f && !banned.test(sig(f)) && shown(f);
           const form = selector
             ? document.querySelector(selector)?.closest("form")
-            : (document.querySelector("form#newlink")
-              || document.querySelector("form.submit-form")
-              || [...document.querySelectorAll("form[action*='submit']")][0]
-              || [...document.querySelectorAll("form")].find((f) => !banned.test((f.action || "") + "/" + (f.id || ""))));
-          if (!form) return { error: "no safe form found" };
-          if (banned.test((form.action || "") + "/" + (form.id || ""))) return { error: "refusing to submit auth/search form" };
+            : (["form#newlink", "form.submit-form", "form[action*='submit']"].map((s) => document.querySelector(s)).find(safe)
+              || [...document.querySelectorAll("form")].find(safe));
+          if (!form) return { error: "no safe visible form found" };
+          if (banned.test(sig(form))) return { error: "refusing to submit auth/search form" };
           if (typeof form.requestSubmit === "function") form.requestSubmit();
           else form.submit();
-          return { submitted: form.action || form.id || "form" };
+          return { submitted: String(sig(form)).slice(0, 120) };
         },
         args: [msg.selector || null],
       });
       if (res?.result?.error) throw new Error(res.result.error);
+      reply(true, res?.result);
+    } else if (msg.action === "scanPage") {
+      const tab = await findHttpTab(msg);
+      if (!tab) throw new Error("no http tab to scan");
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const els = [...document.querySelectorAll("button, a, input, select, textarea, [contenteditable=true], [role=button]")];
+          const out = [];
+          for (const e of els) {
+            if (out.length >= 100) break;
+            const r = e.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) continue;
+            const s = getComputedStyle(e);
+            if (s.visibility === "hidden" || s.display === "none" || s.opacity === "0") continue;
+            out.push({
+              tag: e.tagName.toLowerCase(),
+              text: ((e.innerText || e.value || e.getAttribute("aria-label") || e.placeholder || e.name || "").replace(/\s+/g, " ")).slice(0, 80),
+              x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+            });
+          }
+          return out;
+        },
+      });
+      reply(true, res?.result);
+    } else if (msg.action === "uploadFile") {
+      const tab = await findHttpTab(msg);
+      if (!tab) throw new Error("no http tab to upload on");
+      if (!msg.dataBase64 || msg.dataBase64.length > 20 * 1024 * 1024) throw new Error("file missing or over 15 MB");
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: async (selector, filename, mime, b64) => {
+          const input = selector ? document.querySelector(selector) : document.querySelector('input[type="file"]');
+          if (!input) return { error: "no file input found" };
+          const blob = await (await fetch(`data:${mime};base64,${b64}`)).blob();
+          const dt = new DataTransfer();
+          dt.items.add(new File([blob], filename, { type: mime }));
+          input.files = dt.files;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          return { uploaded: filename, size: blob.size };
+        },
+        args: [msg.selector || null, msg.filename, msg.mime || "application/octet-stream", msg.dataBase64],
+      });
+      if (res?.result?.error) throw new Error(res.result.error);
+      await showCursor(tab.id, null);
       reply(true, res?.result);
     } else if (msg.action === "pageInfo") {
       let tabId = msg.tabId;
