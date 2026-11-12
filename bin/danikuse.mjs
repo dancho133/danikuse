@@ -4,7 +4,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const HOME = process.env.DANIKUSE_HOME || join(homedir(), ".danikuse");
 const AUTO_PROFILE = join(HOME, "automation-profile");
@@ -218,6 +219,12 @@ async function browserCmd(args, surface) {
   const base = ["--session", hide ? "danikuse-auto-bg" : "danikuse-auto",
     "--profile", hide ? AUTO_PROFILE_BG : AUTO_PROFILE];
   if (!hide) base.push("--headed");
+  if (action === "open") {
+    const stealthJs = join(dirname(fileURLToPath(import.meta.url)), "..", "stealth", "stealth.js");
+    if (existsSync(stealthJs)) base.push("--init-script", stealthJs);
+    // HTTP-level UA: headless Chromium sends HeadlessChrome/<v>; servers see it.
+    base.push("--headers", JSON.stringify({ "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36" }));
+  }
   if (action === "screenshot") {
     const shot = join(runDir, "screenshot.png");
     const r = run("agent-browser", [...base, "screenshot", shot], env);
