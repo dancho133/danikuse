@@ -1,0 +1,4 @@
+- insert:
+    - id: danikuse-commands
+      name: '@local/danikuse-commands'
+      config: {}

@@ -1,0 +1,9 @@
+runs/
+.danikuse/
+node_modules/
+*.log
+.env
+
+.agy-staff/
+host/com.danikuse.bridge.json
+bridge-token.txt

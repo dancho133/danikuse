@@ -1,0 +1,14 @@
+{
+  "name": "danikuse",
+  "version": "0.1.0",
+  "description": "One command that gives an AI agent controlled use of your Brave browser and Windows desktop.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": { "danikuse": "./bin/danikuse.mjs" },
+  "scripts": {
+    "doctor": "node ./bin/danikuse.mjs doctor",
+    "benchmark": "node ./scripts/benchmark.mjs",
+    "scan": "node ./scripts/secret-scan.mjs"
+  },
+  "engines": { "node": ">=18" }
+}
