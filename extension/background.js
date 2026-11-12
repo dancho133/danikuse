@@ -78,8 +78,8 @@ async function onCommand(msg) {
       if (!tab) throw new Error("no http tab to type on");
       const [res] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: (text, submit) => {
-          const el = document.querySelector('div[contenteditable="true"], textarea, input[type="text"]');
+        func: (text, submit, selector) => {
+          const el = selector ? document.querySelector(selector) : document.querySelector('div[contenteditable="true"], textarea, input[type="text"]');
           if (!el) return { error: "no text field found" };
           el.focus();
           document.execCommand("insertText", false, text);
@@ -92,7 +92,28 @@ async function onCommand(msg) {
           }
           return { typed: text, x: r.left + r.width / 2, y: r.top + r.height / 2 };
         },
-        args: [msg.text, Boolean(msg.submit)],
+        args: [msg.text, Boolean(msg.submit), msg.selector || null],
+      });
+      if (res?.result?.error) throw new Error(res.result.error);
+      await showCursor(tab.id, res?.result);
+      reply(true, res?.result);
+    } else if (msg.action === "clickOnTab") {
+      const tab = await findHttpTab(msg);
+      if (!tab) throw new Error("no http tab to click on");
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (text, selector) => {
+          const els = selector
+            ? [...document.querySelectorAll(selector)]
+            : [...document.querySelectorAll("button, a, input[type=submit]")];
+          const el = els.find((e) => (e.innerText || e.value || "").toLowerCase().includes(text.toLowerCase()));
+          if (!el) return { error: `no clickable element matching: ${text}` };
+          el.scrollIntoView({ block: "center" });
+          el.click();
+          const r = el.getBoundingClientRect();
+          return { clicked: (el.innerText || el.value || "").slice(0, 60), x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        },
+        args: [msg.text || "", msg.selector || null],
       });
       if (res?.result?.error) throw new Error(res.result.error);
       await showCursor(tab.id, res?.result);
