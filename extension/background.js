@@ -79,7 +79,8 @@ async function onCommand(msg) {
       const [res] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (text, submit, selector) => {
-          const el = selector ? document.querySelector(selector) : document.querySelector('div[contenteditable="true"], textarea, input[type="text"]');
+          const pick = (s) => [...document.querySelectorAll(s)].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+          const el = selector ? pick(selector) : (pick('div[contenteditable="true"]') || pick("textarea") || pick('input[type="text"]'));
           if (!el) return { error: "no text field found" };
           el.focus();
           document.execCommand("insertText", false, text);
@@ -103,10 +104,12 @@ async function onCommand(msg) {
       const [res] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (text, selector) => {
-          const els = selector
+          const visible = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const els = (selector
             ? [...document.querySelectorAll(selector)]
-            : [...document.querySelectorAll("button, a, input[type=submit]")];
-          const el = els.find((e) => (e.innerText || e.value || "").toLowerCase().includes(text.toLowerCase()));
+            : [...document.querySelectorAll("button, a, input[type=submit]")]).filter(visible);
+          const label = (e) => ((e.innerText || e.value || e.getAttribute("aria-label") || "").toLowerCase());
+          const el = els.find((e) => label(e).includes(text.toLowerCase()));
           if (!el) return { error: `no clickable element matching: ${text}` };
           el.scrollIntoView({ block: "center" });
           el.click();
@@ -117,6 +120,29 @@ async function onCommand(msg) {
       });
       if (res?.result?.error) throw new Error(res.result.error);
       await showCursor(tab.id, res?.result);
+      reply(true, res?.result);
+    } else if (msg.action === "submitForm") {
+      const tab = await findHttpTab(msg);
+      if (!tab) throw new Error("no http tab to submit on");
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (selector) => {
+          const banned = /logout|login|signout|signin|search/i;
+          const form = selector
+            ? document.querySelector(selector)?.closest("form")
+            : (document.querySelector("form#newlink")
+              || document.querySelector("form.submit-form")
+              || [...document.querySelectorAll("form[action*='submit']")][0]
+              || [...document.querySelectorAll("form")].find((f) => !banned.test((f.action || "") + "/" + (f.id || ""))));
+          if (!form) return { error: "no safe form found" };
+          if (banned.test((form.action || "") + "/" + (form.id || ""))) return { error: "refusing to submit auth/search form" };
+          if (typeof form.requestSubmit === "function") form.requestSubmit();
+          else form.submit();
+          return { submitted: form.action || form.id || "form" };
+        },
+        args: [msg.selector || null],
+      });
+      if (res?.result?.error) throw new Error(res.result.error);
       reply(true, res?.result);
     } else if (msg.action === "pageInfo") {
       let tabId = msg.tabId;
