@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/logo.svg" width="96" alt="Danikuse logo"></p>
+<p align="center"><img src="docs/logo.svg?v=2" width="180" alt="Danikuse logo"></p>
 
 # Danikuse
 
